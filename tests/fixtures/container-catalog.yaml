@@ -1,0 +1,20 @@
+document:
+  dsl: '1.0.3'
+  namespace: test
+  name: container-catalog
+  version: '1.0.0'
+use:
+  secrets:
+    - HCP_TERRAFORM_TOKEN
+  catalogs:
+    hcp:
+      endpoint: ../catalog
+    variable-sets:
+      endpoint: ../catalog/hcp-terraform-variable-sets
+do:
+  - resolve-omitted-variable-set:
+      call: validate:1.0.0@variable-sets
+      with:
+        organization: mock-org
+        variable_set_name: ''
+        project_id: prj-mock

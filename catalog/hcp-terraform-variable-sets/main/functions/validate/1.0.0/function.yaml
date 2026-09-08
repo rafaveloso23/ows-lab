@@ -1,0 +1,63 @@
+# Resolve an optional variable set and apply it to a project when exactly one match exists.
+# Parameters: organization, variable_set_name, project_id. Requires the hcp catalog and HCP_TERRAFORM_TOKEN.
+do:
+  - initialize:
+      set:
+        request: '${ . }'
+  - variable-set-configured:
+      switch:
+        - configured:
+            when: '${ (.request.variable_set_name // "") != "" }'
+            then: find-variable-set
+        - omitted:
+            then: omitted-variable-set
+  - find-variable-set:
+      call: hcp-terraform-variable-set-find:1.0.0@hcp
+      with:
+        organization: '${ .request.organization }'
+        variable_set_name: '${ .request.variable_set_name }'
+      output:
+        as: '${ $input + {variable_set: .} }'
+  - validate-variable-set:
+      switch:
+        - found:
+            when: '${ .variable_set.found }'
+            then: apply-variable-set
+        - missing:
+            when: '${ .variable_set.match_count == 0 }'
+            then: missing-variable-set
+        - invalid:
+            then: invalid-variable-set
+  - apply-variable-set:
+      call: hcp-terraform-variable-set-apply-to-project:1.0.0@hcp
+      with:
+        variable_set_id: '${ .variable_set.variable_set_id }'
+        project_id: '${ .request.project_id }'
+      output:
+        as: '${ . + {found: true, variable_set_name: $input.variable_set.variable_set_name, reason: "applied"} }'
+      then: exit
+  - omitted-variable-set:
+      set:
+        applied: false
+        found: false
+        variable_set_id: null
+        variable_set_name: null
+        project_id: '${ .request.project_id }'
+        reason: omitted
+      then: exit
+  - missing-variable-set:
+      set:
+        applied: false
+        found: false
+        variable_set_id: null
+        variable_set_name: '${ .request.variable_set_name }'
+        project_id: '${ .request.project_id }'
+        reason: not_found
+      then: exit
+  - invalid-variable-set:
+      raise:
+        error:
+          type: https://example.com/errors/variable-set-resolution
+          status: 422
+          title: Variable set must have exactly one match
+          detail: '${ "Variable set \(.request.variable_set_name): \(.variable_set.match_count) exact matches" }'

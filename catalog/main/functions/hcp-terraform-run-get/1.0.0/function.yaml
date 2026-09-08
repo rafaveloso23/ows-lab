@@ -1,0 +1,48 @@
+# Read-only; retries transient HTTP failures. Requires HCP_TERRAFORM_TOKEN.
+do:
+- get:
+    try:
+    - request:
+        call: http
+        with:
+          method: get
+          endpoint:
+            uri: ${ "https://app.terraform.io/api/v2/runs/\(.run_id)" }
+            authentication:
+              bearer:
+                use: HCP_TERRAFORM_TOKEN
+          headers:
+            accept: application/vnd.api+json
+    catch:
+      when: ${ .status == 408 or .status == 429 or .status == 500 or .status == 502 or .status == 503 or .status == 504 }
+      retry:
+        delay:
+          seconds: 1
+        backoff:
+          exponential: {}
+        limit:
+          attempt:
+            count: 3
+- validate:
+    switch:
+    - valid:
+        when: ${ .data.type == "runs" and (.data.id | type) == "string" and (.data.attributes.status | type) == "string" and
+          (.data.relationships.workspace.data.id | type) == "string" }
+        then: result
+    - invalid:
+        then: invalid-response
+- invalid-response:
+    raise:
+      error:
+        type: https://example.com/errors/terraform-run
+        status: 502
+        title: Invalid Terraform API response
+        detail: ${ "Response does not match the expected resource" }
+- result:
+    set:
+      value: '${ {run_id: .data.id, workspace_id: .data.relationships.workspace.data.id, status: .data.attributes.status,
+        is_destroy: .data.attributes["is-destroy"], plan_only: .data.attributes["plan-only"], has_changes: .data.attributes["has-changes"],
+        apply_started: (.data.attributes["status-timestamps"]["applying-at"] != null), status_timestamps: (.data.attributes["status-timestamps"]
+        // {})} }'
+    output:
+      as: ${ .value }

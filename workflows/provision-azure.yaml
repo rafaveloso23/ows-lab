@@ -1,0 +1,81 @@
+document:
+  dsl: '1.0.3'
+  namespace: catalog
+  name: provision-azure
+  version: '1.0.0'
+input:
+  schema:
+    format: json
+    document:
+      type: object
+      required: [organization, project_name, module_name, provider_name, workspace_name]
+      properties:
+        organization:
+          type: string
+          minLength: 1
+        project_name:
+          type: string
+          minLength: 1
+        notification_url:
+          type: string
+          format: uri
+        notification_triggers:
+          type: array
+          items:
+            type: string
+        provider_name:
+          type: string
+          minLength: 1
+        variable_set_name:
+          type: string
+        module_name:
+          type: string
+          minLength: 1
+        workspace_name:
+          type: string
+          pattern: '^[A-Za-z0-9_-]+$'
+        attributes:
+          type: object
+        vars:
+          type: array
+          items:
+            type: object
+use:
+  secrets:
+    - HCP_TERRAFORM_TOKEN
+  catalogs:
+    hcp:
+      endpoint: ../catalog
+    modules:
+      endpoint: ../catalog/hcp-terraform-modules
+    projects:
+      endpoint: ../catalog/hcp-terraform-projects
+    variable-sets:
+      endpoint: ../catalog/hcp-terraform-variable-sets
+    provisioning:
+      endpoint: ../catalog/hcp-terraform-provisioning
+do:
+  - provision:
+      call: azurerm:1.0.0@provisioning
+      with:
+        organization: '${ .organization }'
+        project_name: '${ .project_name }'
+        notification_url: '${ .notification_url }'
+        notification_triggers: '${ .notification_triggers }'
+        provider_name: '${ .provider_name }'
+        variable_set_name: '${ .variable_set_name // "" }'
+        module_name: '${ .module_name }'
+        workspace_name: '${ .workspace_name }'
+        attributes: '${ .attributes // {} }'
+        vars: '${ .vars // [] }'
+  - monitor:
+      call: hcp-terraform-workspace-run-monitor:1.0.0@hcp
+      with:
+        workspace_id: '${ .workspace_id }'
+      output:
+        as: '${ $input + {monitor: .} }'
+  - result:
+      call: result:1.0.0@provisioning
+      with:
+        workspace_id: '${ .workspace_id }'
+        monitor: '${ .monitor }'

@@ -1,0 +1,180 @@
+# Read-only monitoring. Pins current-run and returns terminal outcome; the caller decides cleanup.
+do:
+- initialize:
+    set:
+      workspace_id: ${ .workspace_id }
+      max_polls: ${ .max_polls // 360 }
+      polls: 0
+      events: []
+      seen_event_ids: []
+      last_status: null
+- validate-input:
+    switch:
+    - valid:
+        when: ${ (.workspace_id | test("^ws-[A-Za-z0-9]+$")) and (.max_polls | type) == "number" and .max_polls >= 1 and .max_polls
+          == (.max_polls | floor) }
+        then: get-current-run
+    - invalid:
+        then: invalid-input
+- invalid-input:
+    raise:
+      error:
+        type: https://example.com/errors/terraform-run
+        status: 400
+        title: Invalid monitoring input
+        detail: ${ "workspace_id and a positive integer max_polls are required" }
+- get-current-run:
+    call: hcp-terraform-workspace-current-run-get:1.0.0@hcp
+    with:
+      workspace_id: ${ .workspace_id }
+    output:
+      as: '${ $input + {workspace: ., polls: ($input.polls + 1)} }'
+- pin-current-run:
+    switch:
+    - wrong-workspace:
+        when: ${ .workspace.workspace_id != .workspace_id }
+        then: invalid-run
+    - found:
+        when: ${ .workspace.workspace_id == .workspace_id and (.workspace.run_id // "") != "" }
+        then: pin-run
+    - exhausted:
+        when: ${ .workspace.workspace_id == .workspace_id and (.workspace.run_id // "") == "" and .polls >= .max_polls }
+        then: timed-out
+    - waiting:
+        then: wait-current-run
+- wait-current-run:
+    wait:
+      seconds: 10
+    then: get-current-run
+- pin-run:
+    set:
+      run_id: ${ .workspace.run_id }
+    output:
+      as: ${ $input + . }
+- get-run:
+    call: hcp-terraform-run-get:1.0.0@hcp
+    with:
+      run_id: ${ .run_id }
+    output:
+      as: '${ $input + {run: ., polls: ($input.polls + 1)} }'
+- validate-run:
+    switch:
+    - valid:
+        when: ${ .run.run_id == .run_id and .run.workspace_id == .workspace_id }
+        then: get-events
+    - invalid:
+        then: invalid-run
+- invalid-run:
+    raise:
+      error:
+        type: https://example.com/errors/terraform-run
+        status: 502
+        title: Run or workspace identity mismatch
+        detail: ${ "The response does not belong to workspace \(.workspace_id)" }
+- get-events:
+    call: hcp-terraform-run-events-get:1.0.0@hcp
+    with:
+      run_id: ${ .run_id }
+    output:
+      as: '${ $input + {received_events: .events} }'
+- collect-events:
+    set:
+      events: ${ (.events + .received_events) | unique_by(.id) | sort_by(.created_at, .id) }
+      new_events: ${ [.received_events[] | select(.id as $id | ($input.seen_event_ids | index($id)) == null)] }
+    output:
+      as: ${ $input + . }
+- report-run-progress:
+    if: ${ .run.status != .last_status or (.new_events | length) > 0 }
+    metadata:
+      console-progress: true
+    set:
+      workspace_id: ${ .workspace_id }
+      run_id: ${ .run_id }
+      status: ${ .run.status }
+      events: ${ .new_events }
+    output:
+      as: ${ $input }
+- remember-progress:
+    set:
+      last_status: ${ .run.status }
+      seen_event_ids: ${ [.events[].id] }
+    output:
+      as: ${ $input + . }
+- determine-outcome:
+    set:
+      outcome: ${ if .run.status == "applied" or (.run.status == "planned_and_finished" and .run.plan_only == false and .run.has_changes
+        == false) then "success" elif (["errored", "canceled", "force_canceled", "discarded", "policy_soft_failed"] | index($input.run.status))
+        != null then "failure" elif .run.status == "planned_and_finished" then "plan_only" elif ((["pending", "fetching",
+        "fetching_completed", "pre_plan_running", "pre_plan_completed", "queuing", "plan_queued", "planning", "planned", "cost_estimating",
+        "cost_estimated", "policy_checking", "policy_override", "policy_checked", "confirmed", "post_plan_running", "post_plan_completed",
+        "planned_and_saved", "apply_queued", "applying"] | index($input.run.status)) != null) | not then "unknown" else "pending"
+        end }
+    output:
+      as: ${ $input + . }
+- classify:
+    switch:
+    - success:
+        when: ${ .outcome == "success" }
+        then: completed-successfully
+    - failure:
+        when: ${ .outcome == "failure" }
+        then: failed-result
+    - plan-only:
+        when: ${ .outcome == "plan_only" }
+        then: not-applied
+    - unknown:
+        when: ${ .outcome == "unknown" }
+        then: unknown-status
+    - pending:
+        then: check-limit
+- check-limit:
+    switch:
+    - exhausted:
+        when: ${ .polls >= .max_polls }
+        then: timed-out
+    - pending:
+        then: wait-run
+- wait-run:
+    wait:
+      seconds: 10
+    then: get-run
+- failed-result:
+    set:
+      success: false
+      workspace_id: ${ .workspace_id }
+      run_id: ${ .run_id }
+      status: ${ .run.status }
+      apply_started: ${ .run.apply_started }
+      is_destroy: ${ .run.is_destroy }
+      no_code: ${ .workspace.no_code }
+      events: ${ .events }
+    then: exit
+- timed-out:
+    raise:
+      error:
+        type: https://example.com/errors/terraform-run
+        status: 408
+        title: Run monitoring limit reached
+        detail: ${ "Workspace \(.workspace_id), run \(.run_id // "not-yet-created"), last status \(.last_status // "waiting_for_current_run").
+          No destroy queued." }
+- unknown-status:
+    raise:
+      error:
+        type: https://example.com/errors/terraform-run
+        status: 502
+        title: Unrecognized run status
+        detail: '${ "Run \(.run_id): \(.run.status). No destroy queued." }'
+- not-applied:
+    raise:
+      error:
+        type: https://example.com/errors/terraform-run
+        status: 409
+        title: Run finished without a provisioning apply
+        detail: ${ "Run \(.run_id) is plan-only or did not confirm a no-change result. No destroy queued." }
+- completed-successfully:
+    set:
+      success: true
+      workspace_id: ${ .workspace_id }
+      run_id: ${ .run_id }
+      status: ${ .run.status }
+    then: exit

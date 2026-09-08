@@ -1,0 +1,27 @@
+# Read a private registry module. Parameters: organization, module_name, module_provider.
+# Returns the complete API response. Requires HCP_TERRAFORM_TOKEN.
+do:
+  - get-module:
+      try:
+        - request-module:
+            call: http
+            with:
+              method: get
+              endpoint:
+                uri: '${ "https://app.terraform.io/api/v2/organizations/\(.organization | @uri)/registry-modules/private/\(.organization | @uri)/\(.module_name | @uri)/\(.module_provider | @uri)" }'
+                authentication:
+                  bearer:
+                    use: HCP_TERRAFORM_TOKEN
+              headers:
+                accept: application/vnd.api+json
+                content-type: application/vnd.api+json
+      catch:
+        when: '${ .status == 408 or .status == 429 or .status == 500 or .status == 502 or .status == 503 or .status == 504 }'
+        retry:
+          delay:
+            seconds: 1
+          backoff:
+            exponential: {}
+          limit:
+            attempt:
+              count: 3

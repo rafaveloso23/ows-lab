@@ -1,0 +1,48 @@
+# Resolve an existing project or create it when absent.
+# Parameters: organization, project_name, notification_url, notification_triggers.
+# Requires the hcp and projects catalogs and HCP_TERRAFORM_TOKEN.
+do:
+  - initialize:
+      set:
+        request: '${ . }'
+  - get-project:
+      call: hcp-terraform-project-get:1.0.0@hcp
+      with:
+        organization: '${ .request.organization }'
+        project_name: '${ .request.project_name }'
+      output:
+        as: '${ $input + {project: .} }'
+  - project-exists:
+      switch:
+        - found:
+            when: '${ .project.exists }'
+            then: existing-project
+        - missing:
+            then: create-project
+  - create-project:
+      call: hcp-terraform-project-create:1.0.0@hcp
+      with:
+        organization: '${ .request.organization }'
+        project_name: '${ .request.project_name }'
+      output:
+        as: '${ $input + {project: .} }'
+  - create-project-notification:
+      call: notification-create:1.0.0@projects
+      with:
+        project_id: '${ .project.project_id }'
+        url: '${ .request.notification_url }'
+        triggers: '${ .request.notification_triggers }'
+      output:
+        as: '${ $input + {notification: .} }'
+  - created-project:
+      set:
+        project_id: '${ .project.project_id }'
+        project_name: '${ .project.project_name }'
+        project_created: true
+      then: exit
+  - existing-project:
+      set:
+        project_id: '${ .project.project_id }'
+        project_name: '${ .project.project_name }'
+        project_created: false
+      then: exit

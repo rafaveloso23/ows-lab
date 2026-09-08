@@ -1,0 +1,29 @@
+# Parameters: organization, variable_set_name. Required secret: HCP_TERRAFORM_TOKEN.
+# `q` is a search, so the output keeps only exact-name matches and exposes ambiguity.
+do:
+  - find-variable-set:
+      try:
+        - request-variable-sets:
+            call: http
+            with:
+              method: get
+              endpoint:
+                uri: '${ "https://app.terraform.io/api/v2/organizations/\(.organization)/varsets?q=\(.variable_set_name)" }'
+                authentication:
+                  bearer:
+                    use: HCP_TERRAFORM_TOKEN
+              headers:
+                accept: application/vnd.api+json
+                content-type: application/vnd.api+json
+            output:
+              as: '${ [.data[] | select(.attributes.name == $input.variable_set_name)] as $matches | {found: (($matches | length) == 1), ambiguous: (($matches | length) > 1), match_count: ($matches | length), variable_set_id: $matches[0].id, variable_set_name: $matches[0].attributes.name} }'
+      catch:
+        when: '${ .status == 408 or .status == 429 or .status == 500 or .status == 502 or .status == 503 or .status == 504 }'
+        retry:
+          delay:
+            seconds: 1
+          backoff:
+            exponential: {}
+          limit:
+            attempt:
+              count: 3

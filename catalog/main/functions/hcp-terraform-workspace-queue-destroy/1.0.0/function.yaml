@@ -1,0 +1,49 @@
+# Parameters: workspace_id; optional message. POST is NEVER retried. Queues a destroy with auto-apply.
+do:
+- queue:
+    call: http
+    with:
+      method: post
+      endpoint:
+        uri: https://app.terraform.io/api/v2/runs
+        authentication:
+          bearer:
+            use: HCP_TERRAFORM_TOKEN
+      headers:
+        accept: application/vnd.api+json
+        content-type: application/vnd.api+json
+      body:
+        data:
+          type: runs
+          attributes:
+            is-destroy: true
+            auto-apply: true
+            message: ${ .message // "Destroy queued by Open Workflow" }
+          relationships:
+            workspace:
+              data:
+                type: workspaces
+                id: ${ .workspace_id }
+    output:
+      as: '${ $input + {response: .} }'
+- validate:
+    switch:
+    - valid:
+        when: ${ .response.data.type == "runs" and (.response.data.id | type) == "string" and .response.data.attributes["is-destroy"]
+          == true and .response.data.relationships.workspace.data.id == .workspace_id }
+        then: result
+    - invalid:
+        then: invalid-response
+- invalid-response:
+    raise:
+      error:
+        type: https://example.com/errors/terraform-run
+        status: 502
+        title: Destroy queue result is uncertain
+        detail: ${ "Do not retry automatically; inspect runs in workspace \(.workspace_id)" }
+- result:
+    set:
+      workspace_id: ${ .workspace_id }
+      destroy_run_id: ${ .response.data.id }
+      status: ${ .response.data.attributes.status }
+      destroy_queued: true

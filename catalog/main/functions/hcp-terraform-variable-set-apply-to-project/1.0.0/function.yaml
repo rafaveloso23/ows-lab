@@ -1,0 +1,19 @@
+# Parameters: variable_set_id, project_id. Required secret: HCP_TERRAFORM_TOKEN.
+# No automatic POST retry because a lost response leaves the result uncertain.
+call: http
+with:
+  method: post
+  endpoint:
+    uri: '${ "https://app.terraform.io/api/v2/varsets/\(.variable_set_id)/relationships/projects" }'
+    authentication:
+      bearer:
+        use: HCP_TERRAFORM_TOKEN
+  headers:
+    accept: application/vnd.api+json
+    content-type: application/vnd.api+json
+  body:
+    data:
+      - type: projects
+        id: '${ .project_id }'
+output:
+  as: '${ {applied: true, variable_set_id: $input.variable_set_id, project_id: $input.project_id} }'

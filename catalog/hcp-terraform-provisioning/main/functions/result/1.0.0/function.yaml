@@ -1,0 +1,40 @@
+# Convert a monitored provisioning outcome into the final result and clean up managed resources on failure.
+# Parameters: workspace_id, monitor. Requires the hcp catalog and HCP_TERRAFORM_TOKEN.
+do:
+  - on-failure:
+      if: '${ .monitor.success == false }'
+      do:
+        - get-resources:
+            call: hcp-terraform-workspace-resources-get:1.0.0@hcp
+            with:
+              workspace_id: '${ .workspace_id }'
+            output:
+              as: '${ $input + {inventory: .} }'
+        - queue-destroy:
+            if: '${ .inventory.has_resources }'
+            call: hcp-terraform-workspace-queue-destroy:1.0.0@hcp
+            with:
+              workspace_id: '${ .workspace_id }'
+              message: '${ "Cleanup after failed run \(.monitor.run_id) (\(.monitor.status))" }'
+            output:
+              as: '${ $input + {cleanup: .} }'
+        - failure-result:
+            set:
+              success: false
+              workspace_id: '${ .workspace_id }'
+              run_id: '${ .monitor.run_id }'
+              status: '${ .monitor.status }'
+              cleanup: '${ .cleanup // {destroy_queued: false} }'
+      output:
+        as: '${ $input + {result: .} }'
+  - on-success:
+      if: '${ .monitor.success }'
+      set:
+        success: true
+        workspace_id: '${ .workspace_id }'
+        run_id: '${ .monitor.run_id }'
+        status: '${ .monitor.status }'
+      output:
+        as: '${ $input + {result: .} }'
+  - return-result:
+      set: '${ .result }'

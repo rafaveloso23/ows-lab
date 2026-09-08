@@ -1,0 +1,20 @@
+# Parameters: organization, project_name. Required workflow secret: HCP_TERRAFORM_TOKEN.
+# Never retry POST automatically: the server may already have created the project.
+call: http
+with:
+  method: post
+  endpoint:
+    uri: '${ "https://app.terraform.io/api/v2/organizations/\(.organization)/projects" }'
+    authentication:
+      bearer:
+        use: HCP_TERRAFORM_TOKEN
+  headers:
+    accept: application/vnd.api+json
+    content-type: application/vnd.api+json
+  body:
+    data:
+      type: projects
+      attributes:
+        name: '${ .project_name }'
+output:
+  as: '${ {project_id: .data.id, project_name: .data.attributes.name} }'

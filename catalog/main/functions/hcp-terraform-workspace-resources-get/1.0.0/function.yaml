@@ -1,0 +1,67 @@
+# Parameters: workspace_id. Reads all pages; 404/authorization failures are not an empty inventory.
+do:
+- initialize:
+    set:
+      workspace_id: ${ .workspace_id }
+      page: 1
+      resources: []
+- get-page:
+    try:
+    - request:
+        call: http
+        with:
+          method: get
+          endpoint:
+            uri: ${ "https://app.terraform.io/api/v2/workspaces/\(.workspace_id)/resources?page%5Bnumber%5D=\(.page)&page%5Bsize%5D=100"
+              }
+            authentication:
+              bearer:
+                use: HCP_TERRAFORM_TOKEN
+          headers:
+            accept: application/vnd.api+json
+    catch:
+      when: ${ .status == 408 or .status == 429 or .status == 500 or .status == 502 or .status == 503 or .status == 504 }
+      retry:
+        delay:
+          seconds: 1
+        backoff:
+          exponential: {}
+        limit:
+          attempt:
+            count: 3
+    output:
+      as: '${ $input + {response: .} }'
+- validate-page:
+    switch:
+    - valid:
+        when: ${ (.response.data | type) == "array" and all(.response.data[]; .type == "resources" and (.id | type) == "string")
+          }
+        then: collect
+    - invalid:
+        then: invalid-response
+- invalid-response:
+    raise:
+      error:
+        type: https://example.com/errors/terraform-run
+        status: 502
+        title: Invalid workspace resources response
+        detail: ${ "Expected an array of resources" }
+- collect:
+    set:
+      workspace_id: ${ .workspace_id }
+      page: ${ .page + 1 }
+      resources: ${ .resources + .response.data }
+      more: ${ (.response.links.next // "") != "" }
+- next-page:
+    switch:
+    - more:
+        when: ${ .more }
+        then: get-page
+    - done:
+        then: result
+- result:
+    set:
+      workspace_id: ${ .workspace_id }
+      resources: ${ .resources | unique_by(.id) }
+      resource_count: ${ (.resources | unique_by(.id) | length) }
+      has_resources: ${ (.resources | length) > 0 }

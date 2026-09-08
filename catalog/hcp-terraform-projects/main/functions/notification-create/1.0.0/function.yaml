@@ -1,0 +1,25 @@
+# Create an enabled generic notification configuration for a project.
+# Parameters: project_id, url, triggers. Requires HCP_TERRAFORM_TOKEN.
+# Never retry POST automatically: the server may already have created the configuration.
+call: http
+with:
+  method: post
+  endpoint:
+    uri: '${ "https://app.terraform.io/api/v2/projects/\(.project_id)/notification-configurations" }'
+    authentication:
+      bearer:
+        use: HCP_TERRAFORM_TOKEN
+  headers:
+    accept: application/vnd.api+json
+    content-type: application/vnd.api+json
+  body:
+    data:
+      type: notification-configuration
+      attributes:
+        destination-type: generic
+        enabled: true
+        name: Project notifications
+        url: '${ .url }'
+        triggers: '${ .triggers }'
+output:
+  as: '${ {notification_configuration_id: .data.id, project_id: .data.relationships.subscribable.data.id, enabled: .data.attributes.enabled, url: .data.attributes.url, triggers: .data.attributes.triggers} }'

@@ -1,0 +1,28 @@
+# Resolve only the no-code ID. Requires modules catalog and HCP_TERRAFORM_TOKEN.
+# Parameters: organization, module_name, module_provider. Output: scalar ID string.
+do:
+  - get-module:
+      call: get:1.0.0@modules
+      with:
+        organization: '${ .organization }'
+        module_name: '${ .module_name }'
+        module_provider: '${ .module_provider }'
+  - validate-module:
+      switch:
+        - valid:
+            when: '${ .data.attributes["no-code"] == true and ((.data.relationships["no-code-modules"].data // []) | length) == 1 and ((.data.relationships["no-code-modules"].data[0].id // "") | startswith("nocode-")) }'
+            then: extract-id
+        - invalid:
+            then: invalid-module
+  - extract-id:
+      set:
+        id: '${ .data.relationships["no-code-modules"].data[0].id }'
+      output:
+        as: '${ .id }'
+      then: exit
+  - invalid-module:
+      raise:
+        error:
+          type: https://example.com/errors/no-code-module-resolution
+          status: 422
+          title: Module must be no-code ready with exactly one no-code ID

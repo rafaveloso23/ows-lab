@@ -1,0 +1,27 @@
+# Parameters: no_code_module_id, workspace_name, project_id; optional attributes, vars.
+# Required workflow secret: HCP_TERRAFORM_TOKEN (user or team token).
+# Never retry POST automatically: the server may already have created the workspace.
+call: http
+with:
+  method: post
+  endpoint:
+    uri: '${ "https://app.terraform.io/api/v2/no-code-modules/\(.no_code_module_id)/workspaces" }'
+    authentication:
+      bearer:
+        use: HCP_TERRAFORM_TOKEN
+  headers:
+    accept: application/vnd.api+json
+    content-type: application/vnd.api+json
+  body:
+    data:
+      type: workspaces
+      attributes: '${ ((.attributes // {}) | del(.["setting-overwrites"], .["execution-mode"])) + {name: .workspace_name} }'
+      relationships:
+        project:
+          data:
+            id: '${ .project_id }'
+            type: project
+        vars:
+          data: '${ [(.vars // [])[] | {type: "vars", attributes: .}] }'
+output:
+  as: '${ {workspace_id: .data.id, workspace_name: .data.attributes.name, project_id: .data.relationships.project.data.id, configuration_version_id: .data.relationships["current-configuration-version"].data.id} }'

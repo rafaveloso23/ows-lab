@@ -1,0 +1,29 @@
+# Parameters: organization, project_name. Required workflow secret: HCP_TERRAFORM_TOKEN.
+# SDK 7.32.0.Final requires a do wrapper around a cataloged try task.
+do:
+  - get-project:
+      try:
+        - request-project:
+            call: http
+            with:
+              method: get
+              endpoint:
+                uri: '${ "https://app.terraform.io/api/v2/organizations/\(.organization)/projects?filter%5Bnames%5D=\(.project_name)" }'
+                authentication:
+                  bearer:
+                    use: HCP_TERRAFORM_TOKEN
+              headers:
+                accept: application/vnd.api+json
+                content-type: application/vnd.api+json
+      catch:
+        when: '${ .status == 408 or .status == 429 or .status == 500 or .status == 502 or .status == 503 or .status == 504 }'
+        retry:
+          delay:
+            seconds: 1
+          backoff:
+            exponential: {}
+          limit:
+            attempt:
+              count: 3
+      output:
+        as: '${ {exists: ((.data | length) > 0), project_id: .data[0].id, project_name: .data[0].attributes.name} }'

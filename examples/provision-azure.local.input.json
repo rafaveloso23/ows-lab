@@ -1,0 +1,30 @@
+{
+  "organization": "org-name",
+  "project_name": "prj-notications-new-project3",
+  "notification_url": "https://httpbin.org/post",
+  "notification_triggers": ["run:completed", "run:errored"],
+  "module_name": "storage-service-blueprint",
+  "provider_name": "blueprint",
+  "variable_set_name": "vs-azure-landing-zone-teste",
+  "workspace_name": "azure-dev1ss6",
+  "attributes": {
+    "description": "Workspace Azure criado pelo catalogo",
+    "auto_apply": true
+  },
+  "vars": [
+    {
+      "key": "resource_group_name",
+      "value": "rgnametestefsfs3edge24ss",
+      "category": "terraform",
+      "hcl": false,
+      "sensitive": false
+    },
+    {
+      "key": "storage_account_name",
+      "value": "stsecurestorage2wed03",
+      "category": "terraform",
+      "hcl": false,
+      "sensitive": false
+    }
+  ]
+}

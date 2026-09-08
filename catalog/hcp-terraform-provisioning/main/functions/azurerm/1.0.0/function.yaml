@@ -1,0 +1,48 @@
+# Provider-specific composition built from domain catalogs.
+do:
+  - initialize:
+      set:
+        request: '${ . }'
+  - resolve-module:
+      call: get-nocode-module-id:1.0.0@hcp
+      with:
+        organization: '${ .request.organization }'
+        module_name: '${ .request.module_name }'
+        module_provider: '${ .request.provider_name }'
+      output:
+        as: '${ $input + {no_code_module_id: .} }'
+  - validate-project:
+      call: validate:1.0.0@projects
+      with:
+        organization: '${ .request.organization }'
+        project_name: '${ .request.project_name }'
+        notification_url: '${ .request.notification_url }'
+        notification_triggers: '${ .request.notification_triggers }'
+      output:
+        as: '${ $input + {project: .} }'
+  - validate-variable-set:
+      call: validate:1.0.0@variable-sets
+      with:
+        organization: '${ .request.organization }'
+        variable_set_name: '${ .request.variable_set_name // "" }'
+        project_id: '${ .project.project_id }'
+      output:
+        as: '${ $input + {variable_set: .} }'
+  - validate-provider-variable-set:
+      call: validate:1.0.0@variable-sets
+      with:
+        organization: '${ .request.organization }'
+        variable_set_name: '${ .request.provider_name // "" }'
+        project_id: '${ .project.project_id }'
+      output:
+        as: '${ $input + {provider: .} }'
+  - create-workspace:
+      call: hcp-terraform-no-code-workspace-create:1.0.0@hcp
+      with:
+        no_code_module_id: '${ .no_code_module_id }'
+        workspace_name: '${ .request.workspace_name }'
+        project_id: '${ .project.project_id }'
+        attributes: '${ .request.attributes // {} }'
+        vars: '${ .request.vars // [] }'
+      output:
+        as: '${ . + {project_created: $input.project.project_created, variable_set_ids: ([$input.variable_set.variable_set_id, $input.provider.variable_set_id] | map(select(. != null)))} }'
